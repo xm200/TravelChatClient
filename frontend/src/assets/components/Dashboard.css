@@ -1,0 +1,14 @@
+/* Filename: App.css */
+
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+.dropdown-row {
+    display: flex;
+    left: 0;
+    margin-left: 260px;
+    font-size: 2rem;
+}
