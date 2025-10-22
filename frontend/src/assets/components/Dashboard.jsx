@@ -1,15 +1,16 @@
-import {useEffect, useState} from "react";
-import {GetMemberships} from '../../../wailsjs/go/main/App.js'
+import React, {useEffect, useState} from "react";
+import {GetMemberships, Logout} from '../../../wailsjs/go/main/App.js'
 import Sidebar from "./Sidebar.jsx";
 import Chat from "./Chat.jsx";
 
-const Dashboard = () => {
+const Dashboard = ( {loggedIn, setLoggedIn} ) => {
     const [chats, setChats] = useState([]);
     const [activeChat, setActiveChat] = useState('');
     const [loading, setLoading] = useState(false);
 
     useEffect(() => {
         loadChats()
+        console.log(loggedIn, setLoggedIn)
     }, []);
 
 
@@ -49,11 +50,10 @@ const Dashboard = () => {
                     activeChat={activeChat}
                 />
             </div>
-
             {/* Основной контент */}
-            <Chat chatName={activeChat} />
+            <Chat chatName={activeChat} loggedIn={loggedIn} setLoggedIn={setLoggedIn}/>
         </div>
-    )
+    );
 }
 
 export default Dashboard;

@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"github.com/gorilla/websocket"
@@ -10,6 +11,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -103,6 +105,14 @@ func (a *App) GetMemberships() []string {
 
 func (a *App) Logout() {
 	a.token = ""
+	a.DisconnectAll()
+	a.chats = []string{}
+	a.username = ""
+	log.Printf("Logout completed. Token: %s, Username: %s, Active connections: %d",
+		a.token, a.username, len(a.activeConnections))
+
+	// Отправляем событие на фронтенд о выходе
+	runtime.EventsEmit(a.ctx, "logout_completed")
 }
 
 // Connect connecting to a websocket ws://BASE_URL/ws?token={a.token}&chat={chatName} to listen and send messages
@@ -117,44 +127,92 @@ func (a *App) Connect(name string) string {
 		}
 		a.activeConnections[name] = conn
 		runtime.EventsEmit(a.ctx, "chat_connected", name)
-		go a.ListenConn(conn)
+		go a.ListenConn(conn, name)
 		return "ok"
 	}
 }
 
-func (a *App) ListenConn(conn *websocket.Conn) {
-	defer conn.Close()
+func (a *App) ListenConn(conn *websocket.Conn, name string) {
+	defer func() {
+		// Восстанавливаемся при панике
+		if r := recover(); r != nil {
+			log.Printf("Recovered from panic in ListenConn for %s: %v", name, r)
+		}
+
+		// Удаляем из активных соединений, если еще там
+		if a.activeConnections[name] == conn {
+			delete(a.activeConnections, name)
+			runtime.EventsEmit(a.ctx, "chat_disconnected", name)
+			log.Printf("Listener stopped for chat: %s", name)
+		}
+	}()
+
 	for {
 		m := new(Message)
 		err := conn.ReadJSON(m)
-		if err != nil && m != nil {
-			log.Println(err, "1")
-			delete(a.activeConnections, m.Dest)
+		if err != nil {
+			// Проверяем, является ли ошибка нормальным закрытием соединения
+			if websocket.IsUnexpectedCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
+				log.Printf("WebSocket read error for chat %s: %v", name, err)
+			}
 			break
 		}
 
 		if m != nil && m.Body != "" {
 			runtime.EventsEmit(a.ctx, "message", m)
-			log.Println("Got message from go: ", m)
+			log.Printf("Received message in chat %s: %s", name, m.Body)
 		}
 	}
 }
 
 func (a *App) Disconnect(name string) string {
-	if a.activeConnections[name] != nil {
+	conn, exists := a.activeConnections[name]
+	if !exists || conn == nil {
 		return "Already disconnected"
 	} else {
+		err := conn.Close()
+		if err != nil {
+			log.Printf("Error closing connection for chat %s: %v", name, err)
+			return "Error disconnecting"
+		}
+
+		// Удаляем из активных соединений
 		delete(a.activeConnections, name)
+
+		// Отправляем событие отключения
+		runtime.EventsEmit(a.ctx, "chat_disconnected", name)
+
+		log.Printf("Disconnected from chat: %s", name)
 		return "ok"
 	}
+}
+
+func (a *App) DisconnectAll() {
+	log.Printf("Disconnecting all chats. Active connections: %d", len(a.activeConnections))
+
+	// Создаем копию ключей, так как мапа будет меняться во время итерации
+	chatNames := make([]string, 0, len(a.activeConnections))
+	for name := range a.activeConnections {
+		chatNames = append(chatNames, name)
+	}
+
+	// Закрываем все соединения
+	for _, name := range chatNames {
+		a.Disconnect(name)
+	}
+
+	log.Printf("All connections disconnected. Remaining: %d", len(a.activeConnections))
 }
 
 func (a *App) SendMessage(name, message string) bool {
 	if name == "" || message == "" {
 		return false
 	}
+	if a.username == "" {
+		_ = a.DecodeName()
+	}
 	m := &Message{
-		Sender:    name,
+		Sender:    a.username,
 		Body:      message,
 		Dest:      name,
 		Timestamp: time.Now().String(),
@@ -201,4 +259,61 @@ func (a *App) GetHistory(chat string) []Message {
 		return []Message{}
 	}
 	return ans.History
+}
+
+func (a *App) Fullscreen() error {
+	runtime.WindowFullscreen(a.ctx)
+	return nil
+}
+
+func (a *App) ExitFullscreen() error {
+	runtime.WindowUnfullscreen(a.ctx)
+	return nil
+}
+
+func (a *App) ToggleFullscreen() error {
+	if runtime.WindowIsFullscreen(a.ctx) {
+		runtime.WindowUnfullscreen(a.ctx)
+	} else {
+		runtime.WindowFullscreen(a.ctx)
+	}
+	return nil
+}
+
+// Дополнительные методы для управления окном
+func (a *App) Minimize() error {
+	runtime.WindowMinimise(a.ctx)
+	log.Println("Decreasing window size")
+	return nil
+}
+
+func (a *App) Maximize() error {
+	runtime.WindowMaximise(a.ctx)
+	log.Println("Increasing window size")
+	return nil
+}
+
+func (a *App) Close() error {
+	log.Println("Closed all connections")
+	runtime.Quit(a.ctx)
+	return nil
+}
+
+func (a *App) DecodeName() string {
+	if a.token == "" {
+		return "Unauthorized"
+	} else {
+		type Claims struct {
+			Exp int64  `json:"exp"`
+			Sub string `json:"sub"`
+		}
+		var claims Claims
+		err := json.NewDecoder(base64.NewDecoder(base64.StdEncoding, bytes.NewBuffer([]byte(strings.Split(a.token, ".")[1])))).Decode(&claims)
+		a.username = claims.Sub
+		if err != nil {
+			log.Println("Error while decoding claims: ", err)
+			return "Error while decoding claims"
+		}
+		return claims.Sub
+	}
 }

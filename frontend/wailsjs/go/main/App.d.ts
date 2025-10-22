@@ -3,18 +3,34 @@
 import {main} from '../models';
 import {websocket} from '../models';
 
+export function Close():Promise<void>;
+
 export function Connect(arg1:string):Promise<string>;
 
+export function DecodeName():Promise<string>;
+
 export function Disconnect(arg1:string):Promise<string>;
+
+export function DisconnectAll():Promise<void>;
+
+export function ExitFullscreen():Promise<void>;
+
+export function Fullscreen():Promise<void>;
 
 export function GetHistory(arg1:string):Promise<Array<main.Message>>;
 
 export function GetMemberships():Promise<Array<string>>;
 
-export function ListenConn(arg1:websocket.Conn):Promise<void>;
+export function ListenConn(arg1:websocket.Conn,arg2:string):Promise<void>;
 
 export function Login(arg1:string,arg2:string):Promise<boolean>;
 
 export function Logout():Promise<void>;
 
+export function Maximize():Promise<void>;
+
+export function Minimize():Promise<void>;
+
 export function SendMessage(arg1:string,arg2:string):Promise<boolean>;
+
+export function ToggleFullscreen():Promise<void>;
